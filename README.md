@@ -2,32 +2,38 @@
 
 [中文文档](README_zh.md)
 
-MCP hardware drivers for the [Phanthy Motus](https://github.com/4paradigm/phanthymotus) embodied AI platform.
+Hardware drivers for the **[Phanthy Motus](https://github.com/4paradigm/phanthymotus)** embodied AI platform.
 
-Each driver is an MCP HTTP server that exposes hardware capabilities as tools via JSON-RPC 2.0.
+Each driver is a standalone [MCP](https://modelcontextprotocol.io) HTTP server that exposes hardware capabilities as tools. Drivers automatically register with the [Phanthy Motus Agent Core](https://github.com/4paradigm/phanthymotus) on startup.
 
 ## Available Drivers
 
-| Driver | Hardware | Port |
-|--------|----------|------|
-| `unitree/g1` | Unitree G1 Humanoid Robot | 15701 |
-| `phanthy/remote_control` | Remote Control Bridge | 15710 |
+| Driver | Hardware | Port | Description |
+|--------|----------|------|-------------|
+| `unitree/g1` | Unitree G1 Humanoid | 15701 | Locomotion, arm control, mic, speaker, LED, state monitoring |
+| `phanthy/remote_control` | Remote Control Bridge | 15710 | Remote control relay |
 
 ## Quick Start
 
-### Docker Build
+### Prerequisites
+
+- Docker (ARM64)
+- A running [Phanthy Motus Agent Core](https://github.com/4paradigm/phanthymotus) instance
+
+### Deploy a Driver
 
 ```bash
-cp .env.example .env  # Fill in registry credentials
+cp .env.example .env  # Fill in registry credentials and Agent Core address
 
-# Build all drivers
+# Build a driver image
 ./build.sh unitree/g1
-./build.sh phanthy/remote_control
+
+# Run the container (it will auto-register with Agent Core)
 ```
 
-### Local Development
+Once the driver starts, it registers itself with Agent Core at `http://<agent-core>:15678/api/mcp`. You can then see the device and its tools in the Web Dashboard.
 
-Each driver can be run standalone:
+### Run Locally (without Docker)
 
 ```bash
 cd unitree/g1
@@ -35,39 +41,24 @@ pip install -r requirements.txt
 python main.py
 ```
 
+## How It Works
+
+1. Driver starts as an MCP HTTP server on its designated port
+2. Driver sends a registration request to Agent Core
+3. Agent Core discovers the driver's tools via MCP `initialize` and `tools/list`
+4. Tools become available to the LLM agent and appear in the Web Dashboard
+5. The LLM agent can invoke tools via MCP `tools/call`
+
 ## Writing a New Driver
 
-See the [Driver Development Guide](README_dev.md) or refer to existing drivers.
+Want to add support for new hardware? See the [Driver Development Guide](README_dev.md) for the full specification, or refer to existing drivers as examples.
 
-### MCP Protocol
+Quick overview:
+- Each driver implements MCP JSON-RPC 2.0 over HTTP (`initialize`, `tools/list`, `tools/call`)
+- Tool naming convention: `{device}_{action}` (e.g., `loco_move`, `mic_start`)
+- Driver port range: **15700–15799**
 
-Implement these JSON-RPC 2.0 methods:
-
-| Method | Description |
-|--------|-------------|
-| `initialize` | Handshake, return `serverInfo.name` |
-| `tools/list` | Declare tools with `inputSchema` + `configSchema` |
-| `tools/call` | Handle tool invocations |
-
-### Tool Naming Convention
-
-`{device}_{action}` — e.g., `loco_move`, `arm_grasp`, `mic_start`
-
-### Directory Structure
-
-```
-your_driver/
-├── main.py          # MCP server entry point
-├── device.py        # Hardware communication
-├── config.yaml      # Default configuration
-├── driver.yaml      # Driver metadata (name, description, bus types)
-├── Dockerfile
-└── requirements.txt
-```
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and PR guidelines.
 
 ## License
 

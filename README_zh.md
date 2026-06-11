@@ -2,32 +2,38 @@
 
 [English](README.md)
 
-[Phanthy Motus](https://github.com/4paradigm/phanthymotus) 具身智能平台的 MCP 硬件驱动集合。
+**[Phanthy Motus](https://github.com/4paradigm/phanthymotus)** 具身智能平台的硬件驱动集合。
 
-每个驱动是一个 MCP HTTP 服务器，通过 JSON-RPC 2.0 将硬件能力暴露为工具。
+每个驱动是一个独立的 [MCP](https://modelcontextprotocol.io) HTTP 服务器，将硬件能力暴露为工具。驱动启动后自动注册到 [Phanthy Motus Agent Core](https://github.com/4paradigm/phanthymotus)。
 
 ## 可用驱动
 
-| 驱动 | 硬件 | 端口 |
-|------|------|------|
-| `unitree/g1` | Unitree G1 人形机器人 | 15701 |
-| `phanthy/remote_control` | 远程控制桥接 | 15710 |
+| 驱动 | 硬件 | 端口 | 说明 |
+|------|------|------|------|
+| `unitree/g1` | Unitree G1 人形机器人 | 15701 | 运动控制、机械臂、麦克风、扬声器、LED、状态监控 |
+| `phanthy/remote_control` | 远程控制桥接 | 15710 | 远程控制中继 |
 
 ## 快速开始
 
-### Docker 构建
+### 环境要求
+
+- Docker（ARM64）
+- 一个运行中的 [Phanthy Motus Agent Core](https://github.com/4paradigm/phanthymotus) 实例
+
+### 部署驱动
 
 ```bash
-cp .env.example .env  # 填写镜像仓库凭据
+cp .env.example .env  # 填写镜像仓库凭据和 Agent Core 地址
 
-# 构建驱动
+# 构建驱动镜像
 ./build.sh unitree/g1
-./build.sh phanthy/remote_control
+
+# 运行容器（会自动注册到 Agent Core）
 ```
 
-### 本地开发
+驱动启动后会自动向 Agent Core（`http://<agent-core>:15678/api/mcp`）发送注册请求。注册成功后即可在 Web Dashboard 中看到设备及其工具。
 
-每个驱动可独立运行：
+### 本地运行（无需 Docker）
 
 ```bash
 cd unitree/g1
@@ -35,39 +41,24 @@ pip install -r requirements.txt
 python main.py
 ```
 
+## 工作原理
+
+1. 驱动作为 MCP HTTP 服务器在指定端口启动
+2. 驱动向 Agent Core 发送注册请求
+3. Agent Core 通过 MCP `initialize` 和 `tools/list` 发现驱动的工具
+4. 工具对 LLM Agent 可用，并显示在 Web Dashboard 中
+5. LLM Agent 通过 MCP `tools/call` 调用工具
+
 ## 开发新驱动
 
-参考现有驱动或阅读 [驱动开发指南](README_dev.md)。
+想要为新硬件添加驱动？请参阅 [驱动开发指南](README_dev.md) 获取完整规范，或参考现有驱动实现。
 
-### MCP 协议
+简要概述：
+- 每个驱动实现 MCP JSON-RPC 2.0 over HTTP（`initialize`、`tools/list`、`tools/call`）
+- 工具命名规范：`{设备}_{动作}`（如 `loco_move`、`mic_start`）
+- 驱动端口范围：**15700–15799**
 
-实现以下 JSON-RPC 2.0 方法：
-
-| 方法 | 说明 |
-|------|------|
-| `initialize` | 握手，返回 `serverInfo.name` |
-| `tools/list` | 声明工具（含 `inputSchema` + `configSchema`）|
-| `tools/call` | 处理工具调用 |
-
-### 工具命名规范
-
-`{设备}_{动作}` — 如 `loco_move`、`arm_grasp`、`mic_start`
-
-### 目录结构
-
-```
-your_driver/
-├── main.py          # MCP 服务器入口
-├── device.py        # 硬件通信
-├── config.yaml      # 默认配置
-├── driver.yaml      # 驱动元数据（名称、描述、总线类型）
-├── Dockerfile
-└── requirements.txt
-```
-
-## 贡献
-
-参见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+参见 [CONTRIBUTING.md](CONTRIBUTING.md) 了解开发环境搭建和 PR 指南。
 
 ## 许可证
 
