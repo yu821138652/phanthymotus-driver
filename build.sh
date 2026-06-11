@@ -12,13 +12,16 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MOTUS_ROOT="$(cd "${SCRIPT_DIR}/../phanthy-motus" && pwd)"
-ENV_FILE="${MOTUS_ROOT}/deploy/.env"
-DRIVERS_YAML="${MOTUS_ROOT}/deploy/core/config/drivers.yaml"
+ENV_FILE="${SCRIPT_DIR}/.env"
+MOTUS_ROOT="$(cd "${SCRIPT_DIR}/../phanthymotus" 2>/dev/null && pwd || echo "")"
+DRIVERS_YAML="${MOTUS_ROOT:+${MOTUS_ROOT}/deploy/core/config/drivers.yaml}"
 
 # ── 加载 .env ──────────────────────────────────────────────────────────────
+# Try local .env first, fall back to phanthymotus deploy/.env if available
 if [ -f "${ENV_FILE}" ]; then
     source "${ENV_FILE}"
+elif [ -n "${MOTUS_ROOT}" ] && [ -f "${MOTUS_ROOT}/deploy/.env" ]; then
+    source "${MOTUS_ROOT}/deploy/.env"
 fi
 
 # If registry not configured, build locally only
