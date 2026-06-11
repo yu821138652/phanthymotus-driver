@@ -1,6 +1,6 @@
 # Phanthy Motus Drivers
 
-[中文文档](README_zh.md)
+[中文文档](README_zh.md) | [Official Website](https://motus.phanthy.com)
 
 Hardware drivers for the **[Phanthy Motus](https://github.com/4paradigm/phanthymotus)** embodied AI platform.
 
