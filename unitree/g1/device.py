@@ -2064,7 +2064,7 @@ class SpatialPlugin:
 
     def start(self) -> None:
         """Auto-start mapping on plugin start. Always mapping, always observing."""
-        print("[SpatialPlugin] start() called, scheduling auto-mapping in 3s")
+        print("[SpatialPlugin] start() called, scheduling auto-mapping in 3s", flush=True)
         def _auto_start():
             time.sleep(3)
             try:

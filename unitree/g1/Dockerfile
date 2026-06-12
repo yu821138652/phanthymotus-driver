@@ -48,6 +48,7 @@ COPY scan_context.py /work/scan_context.py
 COPY config.yaml /work/config.yaml
 
 ENV PYTHONPATH=/work
+ENV PYTHONUNBUFFERED=1
 
 EXPOSE 15701
 

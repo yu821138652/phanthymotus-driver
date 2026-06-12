@@ -126,9 +126,14 @@ class G1DeviceBundle:
             print("[bundle] MotionSwitcherPlugin loaded")
 
     def start_all(self) -> None:
-        for p in self._plugins:
-            p.start()
-        print(f"[bundle] All {len(self._plugins)} plugins started")
+        for i, p in enumerate(self._plugins):
+            try:
+                p.start()
+            except Exception as e:
+                print(f"[bundle] Plugin {i} ({type(p).__name__}) start() FAILED: {e}", flush=True)
+                import traceback
+                traceback.print_exc()
+        print(f"[bundle] All {len(self._plugins)} plugins started", flush=True)
 
     def stop_all(self) -> None:
         for p in self._plugins:
