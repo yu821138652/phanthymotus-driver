@@ -1088,6 +1088,10 @@ class _LidarNode(Node):
         self._last_cloud_time: float = 0.0
         self._last_imu_time:   float = 0.0
 
+        # Background thread for lidar processing (don't block DDS dispatch thread)
+        self._lidar_queue = queue.Queue(maxsize=10)
+        threading.Thread(target=self._lidar_process_loop, daemon=True, name="lidar_proc").start()
+
         # Subscribe DDS PointCloud2
         try:
             from unitree_sdk2py.core.channel import ChannelSubscriber
@@ -1109,55 +1113,60 @@ class _LidarNode(Node):
             self.get_logger().warn(f"LidarNode: failed to subscribe imu: {e}")
 
     def _on_cloud(self, msg) -> None:
+        """DDS callback — fast: just copy data and queue for background processing."""
         now = time.monotonic()
         if now - self._last_cloud_time < LIDAR_CLOUD_INTERVAL:
             return
         self._last_cloud_time = now
 
-        # Parse PointCloud2 fields to find x, y, z, intensity offsets
-        field_map = {}
-        for f in msg.fields:
-            field_map[f.name] = (f.offset, f.datatype)
+        try:
+            data = bytes(msg.data)
+            point_step = msg.point_step
+            total_points = msg.width * msg.height
+            field_offsets = {}
+            for f in msg.fields:
+                field_offsets[f.name] = f.offset
+            self._lidar_queue.put_nowait((field_offsets, point_step, total_points, data))
+        except Exception:
+            pass  # queue full, drop
 
-        x_off = field_map.get("x", (0, 7))[0]
-        y_off = field_map.get("y", (4, 7))[0]
-        z_off = field_map.get("z", (8, 7))[0]
-        # intensity may be named "intensity" or "reflectivity"
-        i_off = None
-        for name in ("intensity", "reflectivity"):
-            if name in field_map:
-                i_off = field_map[name][0]
-                break
+    def _lidar_process_loop(self):
+        """Background thread: processes lidar frames and publishes ROS2."""
+        while True:
+            try:
+                item = self._lidar_queue.get(timeout=1.0)
+            except Exception:
+                continue
+            try:
+                field_offsets, point_step, total_points, data = item
+                x_off = field_offsets.get("x", 0)
+                y_off = field_offsets.get("y", 4)
+                z_off = field_offsets.get("z", 8)
+                i_off = field_offsets.get("intensity") or field_offsets.get("reflectivity")
 
-        point_step = msg.point_step
-        total_points = msg.width * msg.height
-        data = bytes(msg.data)
+                stride = max(1, total_points // LIDAR_MAX_POINTS)
+                num_out = min(total_points, LIDAR_MAX_POINTS)
 
-        # Downsample if needed
-        stride = max(1, total_points // LIDAR_MAX_POINTS)
-        num_out = min(total_points, LIDAR_MAX_POINTS)
+                out = struct.pack('<I', num_out)
+                count = 0
+                for i in range(0, total_points * point_step, point_step * stride):
+                    if count >= num_out:
+                        break
+                    if i + point_step > len(data):
+                        break
+                    x = struct.unpack_from('<f', data, i + x_off)[0]
+                    y = struct.unpack_from('<f', data, i + y_off)[0]
+                    z = struct.unpack_from('<f', data, i + z_off)[0]
+                    intensity = struct.unpack_from('<f', data, i + i_off)[0] if i_off is not None else 0.0
+                    out += struct.pack('<ffff', x, y, z, intensity)
+                    count += 1
 
-        # Pack binary: [uint32 num_points][float32 x, y, z, intensity × N]
-        out = struct.pack('<I', num_out)
-        idx = 0
-        count = 0
-        for i in range(0, total_points * point_step, point_step * stride):
-            if count >= num_out:
-                break
-            if i + point_step > len(data):
-                break
-            x = struct.unpack_from('<f', data, i + x_off)[0]
-            y = struct.unpack_from('<f', data, i + y_off)[0]
-            z = struct.unpack_from('<f', data, i + z_off)[0]
-            intensity = struct.unpack_from('<f', data, i + i_off)[0] if i_off is not None else 0.0
-            out += struct.pack('<ffff', x, y, z, intensity)
-            count += 1
-
-        # Publish as UInt8MultiArray (binary passthrough)
-        from std_msgs.msg import UInt8MultiArray
-        ros_msg = UInt8MultiArray()
-        ros_msg.data = list(out)
-        self._cloud_pub.publish(ros_msg)
+                from std_msgs.msg import UInt8MultiArray
+                ros_msg = UInt8MultiArray()
+                ros_msg.data = list(out)
+                self._cloud_pub.publish(ros_msg)
+            except Exception:
+                pass
 
     def _on_imu(self, msg) -> None:
         now = time.monotonic()
@@ -1452,20 +1461,27 @@ class _SlamInfoNode(Node):
         except Exception as e:
             self.get_logger().warn(f"SpatialNode: failed to subscribe rt/slam_key_info: {e}")
 
-        # Subscribe mapping point clouds via ROS2 (not CycloneDDS) for reliability
-        # ROS2 FastDDS has its own thread pool, won't be blocked by CycloneDDS dispatch
-        from sensor_msgs.msg import PointCloud2 as RosPointCloud2
-        self._mapping_sub = self.create_subscription(
-            RosPointCloud2, '/unitree/slam_mapping/points',
-            self._on_ros2_mapping_cloud, _LOW_LAT_QOS
-        )
-        self.get_logger().info("SpatialNode subscribed /unitree/slam_mapping/points (ROS2)")
+        # Subscribe mapping point clouds via CycloneDDS (same domain as SLAM)
+        # Callback is ultra-fast (just queue put), processing in background thread
+        try:
+            from unitree_sdk2py.core.channel import ChannelSubscriber
+            from unitree_sdk2py.idl.sensor_msgs.msg.dds_ import PointCloud2_
+            map_cloud_sub = ChannelSubscriber("rt/unitree/slam_mapping/points", PointCloud2_)
+            map_cloud_sub.Init(self._on_mapping_cloud, 10)
+            self._dds_subs.append(map_cloud_sub)
+            self.get_logger().info("SpatialNode subscribed rt/unitree/slam_mapping/points")
+        except Exception as e:
+            self.get_logger().warn(f"SpatialNode: failed to subscribe mapping points: {e}")
 
-        self._reloc_sub = self.create_subscription(
-            RosPointCloud2, '/unitree/slam_relocation/points',
-            self._on_ros2_mapping_cloud, _LOW_LAT_QOS
-        )
-        self.get_logger().info("SpatialNode subscribed /unitree/slam_relocation/points (ROS2)")
+        try:
+            from unitree_sdk2py.core.channel import ChannelSubscriber
+            from unitree_sdk2py.idl.sensor_msgs.msg.dds_ import PointCloud2_
+            reloc_cloud_sub = ChannelSubscriber("rt/unitree/slam_relocation/points", PointCloud2_)
+            reloc_cloud_sub.Init(self._on_mapping_cloud, 10)
+            self._dds_subs.append(reloc_cloud_sub)
+            self.get_logger().info("SpatialNode subscribed rt/unitree/slam_relocation/points")
+        except Exception as e:
+            self.get_logger().warn(f"SpatialNode: failed to subscribe relocation points: {e}")
 
     def _on_slam_info(self, msg) -> None:
         try:
@@ -1536,20 +1552,6 @@ class _SlamInfoNode(Node):
                     self._nav_status = None
                     self._nav_target_name = None
 
-    def _on_ros2_mapping_cloud(self, msg) -> None:
-        """ROS2 subscription callback for mapping/relocation point clouds. Fast enqueue."""
-        try:
-            point_step = msg.point_step
-            total_points = msg.width * msg.height
-            data = bytes(msg.data)
-            if total_points == 0 or len(data) < point_step:
-                return
-            field_offsets = {}
-            for f in msg.fields:
-                field_offsets[f.name] = f.offset
-            self._cloud_queue.put_nowait((field_offsets, point_step, total_points, data))
-        except Exception:
-            pass  # queue full, drop frame
 
     def _on_mapping_cloud(self, msg) -> None:
         """DDS callback (legacy/slam_info topics): fast enqueue."""
