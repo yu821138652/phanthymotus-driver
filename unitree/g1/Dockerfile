@@ -18,16 +18,17 @@ RUN apt-get update && \
 
 # Build rmw_cyclonedds_cpp from source (apt package unavailable on this platform)
 # Uses the CycloneDDS 0.10.5 already installed at /opt/cyclonedds
+ARG RMW_CYCLONE_URL=https://agi-phanthy-dev-1252788780.cos.ap-beijing.myqcloud.com/public/rmw_cyclonedds-rolling.zip
 RUN . /opt/ros/humble/setup.sh && \
+    curl -fsSL ${RMW_CYCLONE_URL} -o /tmp/rmw_cyclonedds.zip && \
     mkdir -p /tmp/rmw_ws/src && \
-    cd /tmp/rmw_ws/src && \
-    git clone -b humble https://github.com/ros2/rmw_cyclonedds.git --depth=1 && \
+    unzip -q /tmp/rmw_cyclonedds.zip -d /tmp/rmw_ws/src && \
     cd /tmp/rmw_ws && \
     colcon build --packages-select rmw_cyclonedds_cpp \
         --cmake-args -DCMAKE_BUILD_TYPE=Release \
         -DCycloneDDS_DIR=/opt/cyclonedds/lib/cmake/CycloneDDS && \
     cp -r /tmp/rmw_ws/install/rmw_cyclonedds_cpp /opt/ros/humble/ && \
-    rm -rf /tmp/rmw_ws
+    rm -rf /tmp/rmw_ws /tmp/rmw_cyclonedds.zip
 
 RUN pip3 install --no-cache-dir -i ${PYPI_MIRROR} \
     pyyaml netifaces opencv-python-headless numpy pyrealsense2
