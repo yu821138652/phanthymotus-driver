@@ -16,12 +16,18 @@ RUN apt-get update && \
         libusb-1.0-0 && \
     rm -rf /var/lib/apt/lists/*
 
-# Install rmw_cyclonedds_cpp (needed for SLAM point cloud subscription on domain 0)
-RUN echo "deb http://packages.ros.org/ros2/ubuntu jammy main" > /etc/apt/sources.list.d/ros2.list && \
-    curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key | apt-key add - && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends ros-humble-rmw-cyclonedds-cpp && \
-    rm -rf /var/lib/apt/lists/*
+# Build rmw_cyclonedds_cpp from source (apt package unavailable on this platform)
+# Uses the CycloneDDS 0.10.5 already installed at /opt/cyclonedds
+RUN . /opt/ros/humble/setup.sh && \
+    mkdir -p /tmp/rmw_ws/src && \
+    cd /tmp/rmw_ws/src && \
+    git clone -b humble https://github.com/ros2/rmw_cyclonedds.git --depth=1 && \
+    cd /tmp/rmw_ws && \
+    colcon build --packages-select rmw_cyclonedds_cpp \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release \
+        -DCycloneDDS_DIR=/opt/cyclonedds/lib/cmake/CycloneDDS && \
+    cp -r /tmp/rmw_ws/install/rmw_cyclonedds_cpp /opt/ros/humble/ && \
+    rm -rf /tmp/rmw_ws
 
 RUN pip3 install --no-cache-dir -i ${PYPI_MIRROR} \
     pyyaml netifaces opencv-python-headless numpy pyrealsense2
