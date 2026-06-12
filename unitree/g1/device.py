@@ -1530,6 +1530,7 @@ class _SlamInfoNode(Node):
         data = bytes(msg.data)
 
         if total_points == 0 or len(data) < point_step:
+            self.get_logger().debug(f"[mapping_cloud] empty frame: total_points={total_points} data_len={len(data)}")
             return
 
         # Parse all points into numpy array
@@ -1548,6 +1549,7 @@ class _SlamInfoNode(Node):
             points.append((x, y, z))
 
         if not points:
+            self.get_logger().debug(f"[mapping_cloud] all {total_points} points filtered out")
             return
 
         pts_arr = np.array(points, dtype=np.float32)
@@ -1563,8 +1565,15 @@ class _SlamInfoNode(Node):
                 key = (ix, iy, iz)
                 if key not in self._map_buffer:
                     self._map_buffer[key] = (pts_arr[i, 0], pts_arr[i, 1], pts_arr[i, 2])
-            if len(self._map_buffer) > prev_size:
+            new_size = len(self._map_buffer)
+            if new_size > prev_size:
                 self._map_buffer_dirty = True
+
+        new_points = new_size - prev_size
+        self.get_logger().info(
+            f"[mapping_cloud] frame: {len(pts_arr)} pts parsed, "
+            f"+{new_points} new voxels, total={new_size}"
+        )
 
         # Update recent cloud ring buffer (for discover fingerprinting)
         n = len(pts_arr)
@@ -1678,12 +1687,14 @@ class _SlamInfoNode(Node):
         np = _SlamInfoNode.np
 
         if not self._pcd_save_dir:
+            self.get_logger().debug("[save_pcd] no save dir set")
             self._schedule_save_timer()
             return
 
         with self._lock:
             active_map = self._active_map
         if not active_map:
+            self.get_logger().debug("[save_pcd] no active map")
             self._schedule_save_timer()
             return
 
@@ -2024,15 +2035,21 @@ class SpatialPlugin:
     def start(self) -> None:
         """Auto-start mapping on plugin start. Always mapping, always observing."""
         if self._node._map_status == "mapping":
+            print("[SpatialPlugin] start() called but already mapping, skip")
             return  # already mapping, skip (handles multiple start() calls)
+        print("[SpatialPlugin] start() — scheduling auto-discover in 3s")
         def _auto_discover():
             time.sleep(3)  # wait for SLAM service and DDS to stabilize
             if self._node._map_status == "mapping":
+                print("[SpatialPlugin] auto-discover: already mapping after wait, skip")
                 return  # race check
             try:
-                self._do_discover_map()
+                result = self._do_discover_map()
+                print(f"[SpatialPlugin] auto-discover result: {result}")
             except Exception as e:
                 print(f"[SpatialPlugin] auto-discover failed: {e}")
+                import traceback
+                traceback.print_exc()
         threading.Thread(target=_auto_discover, daemon=True).start()
 
     def stop(self) -> None:
@@ -2041,9 +2058,14 @@ class SpatialPlugin:
     def _do_discover_map(self) -> dict:
         """Core discover logic: fingerprint match → load old map, or start new."""
         recent_cloud = self._node.get_recent_cloud()
-        if recent_cloud is None or len(recent_cloud) < 100:
+        cloud_size = len(recent_cloud) if recent_cloud is not None else 0
+        print(f"[SpatialPlugin] _do_discover_map: recent_cloud={cloud_size} points")
+
+        if recent_cloud is None or cloud_size < 100:
             # No lidar data yet — just start mapping blind
+            print("[SpatialPlugin] No lidar data, starting mapping blind")
             code, resp = self._client.StartMapping()
+            print(f"[SpatialPlugin] StartMapping() → code={code}")
             if code == 0:
                 map_name = f"map_{int(time.time())}"
                 pcd_path = f"{self._map_dir}/{map_name}.pcd"
@@ -2051,13 +2073,14 @@ class SpatialPlugin:
                 self._node.set_map_status("mapping")
                 self._node.set_active_map(map_name)
                 self._db.add_map(map_name, pcd_path)
-                print(f"[SpatialPlugin] Started new map (no lidar data): {map_name}")
+                print(f"[SpatialPlugin] Started new map: {map_name}")
                 return {"status": "not_found", "map_name": map_name, "action": "new_map_started"}
             return {"error": f"StartMapping failed, code={code}", "response": resp}
 
         # Generate fingerprint from current environment
         current_sc = self._sc_mgr.make_scan_context(recent_cloud)
         match = self._sc_mgr.query(current_sc)
+        print(f"[SpatialPlugin] Fingerprint query result: {match}")
 
         if match:
             # Found matching map → relocalize then continue mapping
@@ -2065,9 +2088,12 @@ class SpatialPlugin:
             map_info = self._db.get_map(map_name)
             if map_info:
                 pcd_path = map_info["pcd_path"]
+                print(f"[SpatialPlugin] Trying InitPose with map: {map_name}, pcd: {pcd_path}")
                 code, resp = self._client.InitPose(0, 0, 0, 0, 0, 0, 1.0, pcd_path)
+                print(f"[SpatialPlugin] InitPose → code={code}")
                 if code == 0:
-                    self._client.StartMapping()
+                    code2, _ = self._client.StartMapping()
+                    print(f"[SpatialPlugin] StartMapping after InitPose → code={code2}")
                     self._node.load_pcd_to_buffer(pcd_path)
                     self._node.set_map_status("mapping")
                     self._node.set_active_map(map_name)
@@ -2079,7 +2105,9 @@ class SpatialPlugin:
         # No match found → start new map
         map_name = f"map_{int(time.time())}"
         pcd_path = f"{self._map_dir}/{map_name}.pcd"
+        print(f"[SpatialPlugin] No match, starting new map: {map_name}")
         code, resp = self._client.StartMapping()
+        print(f"[SpatialPlugin] StartMapping() → code={code}")
         if code == 0:
             self._node.clear_map_buffer()
             self._node.set_map_status("mapping")
