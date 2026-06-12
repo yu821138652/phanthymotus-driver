@@ -1367,6 +1367,78 @@ def _bearing_label(dx: float, dy: float) -> str:
         return "behind"
 
 
+def _slam_subscriber_process(cloud_queue):
+    """Subprocess: subscribes to SLAM point cloud topics using cyclonedds Python binding (domain 0).
+    Passes (field_offsets, point_step, total_points, data) tuples via multiprocessing Queue.
+    """
+    import os
+    import struct as _struct
+    import time as _time
+
+    os.environ.pop('FASTDDS_BUILTIN_TRANSPORTS', None)
+
+    from cyclonedds.core import Listener, Qos, Policy
+    from cyclonedds.domain import DomainParticipant
+    from cyclonedds.sub import Subscriber, DataReader
+    from cyclonedds.topic import Topic
+    from cyclonedds.idl import IdlStruct
+    from cyclonedds.idl.types import sequence, uint8, uint32, float32
+    from dataclasses import dataclass
+
+    # Minimal PointCloud2 IDL matching Unitree's DDS type
+    @dataclass
+    class PointField(IdlStruct):
+        name: str
+        offset: uint32
+        datatype: uint8
+        count: uint32
+
+    @dataclass
+    class PointCloud2(IdlStruct, typename="sensor_msgs::msg::dds_::PointCloud2_"):
+        sec: uint32
+        nanosec: uint32
+        frame_id: str
+        height: uint32
+        width: uint32
+        fields: sequence[PointField]
+        is_bigendian: bool
+        point_step: uint32
+        row_step: uint32
+        data: sequence[uint8]
+        is_dense: bool
+
+    dp = DomainParticipant(domain_id=0)
+    qos = Qos(Policy.Reliability.BestEffort, Policy.History.KeepLast(5))
+
+    topic_mapping = Topic(dp, "rt/unitree/slam_mapping/points", PointCloud2, qos=qos)
+    topic_reloc = Topic(dp, "rt/unitree/slam_relocation/points", PointCloud2, qos=qos)
+
+    sub = Subscriber(dp, qos=qos)
+    reader_mapping = DataReader(sub, topic_mapping, qos=qos)
+    reader_reloc = DataReader(sub, topic_reloc, qos=qos)
+
+    print("[slam_cloud_sub] subprocess started (cyclonedds native, domain 0)", flush=True)
+
+    while True:
+        for reader in (reader_mapping, reader_reloc):
+            try:
+                samples = reader.take(N=5)
+                for msg in samples:
+                    if msg is None:
+                        continue
+                    total_points = msg.width * msg.height
+                    if total_points == 0:
+                        continue
+                    data = bytes(msg.data)
+                    if len(data) < msg.point_step:
+                        continue
+                    field_offsets = {f.name: f.offset for f in msg.fields}
+                    cloud_queue.put_nowait((field_offsets, msg.point_step, total_points, data))
+            except Exception:
+                pass
+        _time.sleep(0.05)  # 20Hz poll rate
+
+
 class _SlamInfoNode(Node):
     """Subscribes to rt/slam_info, rt/slam_key_info, and mapping point clouds.
     Maintains a 3D voxel map buffer and publishes full map at 1Hz."""
@@ -1461,44 +1533,29 @@ class _SlamInfoNode(Node):
         except Exception as e:
             self.get_logger().warn(f"SpatialNode: failed to subscribe rt/slam_key_info: {e}")
 
-        # Subscribe mapping point clouds via ROS2 FastDDS on domain 0 (where SLAM publishes)
-        # Uses a separate rclpy context + node to join domain 0 independently
-        self._domain0_context = None
-        self._domain0_node = None
-        try:
-            import rclpy
-            from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-            from sensor_msgs.msg import PointCloud2 as RosPC2
+        # Subscribe SLAM mapping point clouds via subprocess (CycloneDDS rmw, domain 0)
+        # Main process uses FastDDS on domain 42, which can't see CycloneDDS publishers.
+        # Subprocess runs rclpy with rmw_cyclonedds_cpp on domain 0, passes data via mp.Queue.
+        import multiprocessing as mp
+        self._slam_cloud_queue = mp.Queue(maxsize=50)
+        self._slam_sub_proc = mp.Process(
+            target=_slam_subscriber_process,
+            args=(self._slam_cloud_queue,),
+            daemon=True,
+            name="slam_cloud_sub",
+        )
+        self._slam_sub_proc.start()
+        self.get_logger().info(f"SpatialNode started SLAM cloud subscriber subprocess (pid={self._slam_sub_proc.pid})")
 
-            self._domain0_context = rclpy.Context()
-            self._domain0_context.init(args=[], domain_id=0)
-            self._domain0_node = rclpy.create_node(
-                "g1_spatial_slam_sub", context=self._domain0_context
-            )
-            qos = QoSProfile(
-                reliability=ReliabilityPolicy.BEST_EFFORT,
-                history=HistoryPolicy.KEEP_LAST,
-                depth=5,
-                durability=DurabilityPolicy.VOLATILE,
-            )
-            self._domain0_node.create_subscription(
-                RosPC2, '/unitree/slam_mapping/points',
-                self._on_mapping_cloud, qos
-            )
-            self._domain0_node.create_subscription(
-                RosPC2, '/unitree/slam_relocation/points',
-                self._on_mapping_cloud, qos
-            )
-            # Spin domain0 node in a dedicated thread
-            def _spin_domain0():
-                while rclpy.ok(context=self._domain0_context):
-                    rclpy.spin_once(self._domain0_node, timeout_sec=0.1)
-            threading.Thread(target=_spin_domain0, daemon=True, name="domain0_spin").start()
-            self.get_logger().info("SpatialNode subscribed SLAM points via FastDDS domain 0")
-        except Exception as e:
-            self.get_logger().warn(f"SpatialNode: failed to setup domain 0 subscription: {e}")
-            import traceback
-            traceback.print_exc()
+        # Background thread to drain mp.Queue → self._cloud_queue (threading.Queue)
+        def _drain_slam_queue():
+            while True:
+                try:
+                    item = self._slam_cloud_queue.get(timeout=1.0)
+                    self._cloud_queue.put_nowait(item)
+                except Exception:
+                    pass
+        threading.Thread(target=_drain_slam_queue, daemon=True, name="slam_queue_drain").start()
 
     def _on_slam_info(self, msg) -> None:
         try:
