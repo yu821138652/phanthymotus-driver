@@ -18,8 +18,6 @@ apt-get update
 apt-get install -y --no-install-recommends \
     libeigen3-dev \
     libpcl-dev \
-    ros-humble-tf2-ros \
-    ros-humble-tf2-eigen \
     cmake build-essential git
 
 echo "[fastlio-build] Cloning FAST-LIO2 (branch: ${FAST_LIO_BRANCH})..."
