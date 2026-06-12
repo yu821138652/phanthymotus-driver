@@ -1366,6 +1366,7 @@ class _SlamInfoNode(Node):
 
     VOXEL_SIZE = 0.05            # 5cm voxel grid for deduplication
     MAP_PUBLISH_INTERVAL = 1.0   # 1 Hz full map publish
+    MAP_SAVE_INTERVAL = 5.0      # auto-save PCD every 5s
     MAX_SEND_POINTS = 50000      # max points per publish (downsample if exceeded)
     RECENT_CLOUD_MAX = 50000     # recent cloud ring buffer capacity
     KF_DIST_THRESH = 2.0         # keyframe every 2m movement
@@ -1405,6 +1406,10 @@ class _SlamInfoNode(Node):
 
         # 1Hz full map publish timer
         self._last_map_publish_time: float = 0.0
+
+        # Auto-save PCD timer
+        self._last_map_save_time: float = 0.0
+        self._pcd_save_dir: str | None = None  # set by SpatialPlugin when active map is set
 
         # Subscribe DDS topics
         try:
@@ -1662,6 +1667,61 @@ class _SlamInfoNode(Node):
         ros_msg.data = list(header + body)
         self._mapping_pub.publish(ros_msg)
 
+        # Also auto-save PCD periodically
+        self._maybe_save_pcd()
+
+    def _maybe_save_pcd(self) -> None:
+        """Auto-save map buffer to PCD file every MAP_SAVE_INTERVAL seconds."""
+        np = _SlamInfoNode.np
+        now = time.monotonic()
+        if now - self._last_map_save_time < self.MAP_SAVE_INTERVAL:
+            return
+        self._last_map_save_time = now
+
+        if not self._pcd_save_dir:
+            return
+
+        with self._lock:
+            active_map = self._active_map
+        if not active_map:
+            return
+
+        with self._map_buffer_lock:
+            if not self._map_buffer:
+                return
+            all_points = list(self._map_buffer.values())
+
+        if len(all_points) < 10:
+            return
+
+        # Write PCD file (ASCII format for simplicity and compatibility)
+        pcd_path = os.path.join(self._pcd_save_dir, f"{active_map}.pcd")
+        os.makedirs(os.path.dirname(pcd_path), exist_ok=True)
+        try:
+            pts = np.array(all_points, dtype=np.float32)
+            num = len(pts)
+            with open(pcd_path, 'w') as f:
+                f.write("# .PCD v0.7 - Point Cloud Data\n")
+                f.write("VERSION 0.7\n")
+                f.write("FIELDS x y z\n")
+                f.write("SIZE 4 4 4\n")
+                f.write("TYPE F F F\n")
+                f.write("COUNT 1 1 1\n")
+                f.write(f"WIDTH {num}\n")
+                f.write("HEIGHT 1\n")
+                f.write("VIEWPOINT 0 0 0 1 0 0 0\n")
+                f.write(f"POINTS {num}\n")
+                f.write("DATA ascii\n")
+                for i in range(num):
+                    f.write(f"{pts[i,0]:.4f} {pts[i,1]:.4f} {pts[i,2]:.4f}\n")
+            self.get_logger().info(f"Auto-saved PCD: {pcd_path} ({num} points)")
+        except Exception as e:
+            self.get_logger().warn(f"Failed to save PCD: {e}")
+
+    def set_pcd_save_dir(self, path: str):
+        """Set the directory for auto-saving PCD files."""
+        self._pcd_save_dir = path
+
     def load_pcd_to_buffer(self, pcd_path: str) -> None:
         """Load a PCD file into the voxel map buffer."""
         np = _SlamInfoNode.np
@@ -1874,6 +1934,7 @@ class SpatialPlugin:
         self._mapping_topic = f"/{namespace}/spatial/mapping"
         self._node = _SlamInfoNode(self._pos_tag_topic, self._mapping_topic, self._db, self._sc_mgr)
         self._node.set_active_map(self._db.get_last_used_map())
+        self._node.set_pcd_save_dir(self._map_dir)
         executor.add_node(self._node)
 
     def get_tools(self) -> list:
