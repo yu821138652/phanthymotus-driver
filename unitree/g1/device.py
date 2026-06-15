@@ -2093,7 +2093,8 @@ class SpatialPlugin:
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["tag_place", "untag_place", "list_tags",
+                        "enum": ["start_mapping", "stop_mapping",
+                                 "tag_place", "untag_place", "list_tags",
                                  "navigate_to_tag", "navigate_to_pose",
                                  "pause_nav", "resume_nav", "stop_nav"],
                         "description": "Action to perform",
@@ -2104,9 +2105,12 @@ class SpatialPlugin:
                     "x":           {"type": "number", "description": "Target X coordinate (meters)"},
                     "y":           {"type": "number", "description": "Target Y coordinate (meters)"},
                     "yaw":         {"type": "number", "description": "Target yaw (radians)"},
+                    "map_name":    {"type": "string", "description": "Map name (for start/stop mapping)"},
                 },
                 "required": ["action"],
                 "x-action-params": {
+                    "start_mapping":    {"params": ["map_name"],            "description": "Start SLAM mapping (optional map_name)"},
+                    "stop_mapping":     {"params": [],                      "description": "Stop mapping and save the map"},
                     "tag_place":        {"params": ["name", "description"], "description": "Tag current position with a name"},
                     "untag_place":      {"params": ["name"],               "description": "Remove a place tag"},
                     "list_tags":        {"params": [],                     "description": "List all tags with relative positions"},
@@ -2265,7 +2269,32 @@ class SpatialPlugin:
         return {"error": f"StartMapping failed, code={code}"}
 
     def dispatch(self, action: str, args: dict) -> dict | None:
-        if action == "tag_place":
+        if action == "start_mapping":
+            map_name = args.get("map_name", f"map_{int(time.time())}")
+            code, resp = self._client.StartMapping()
+            if code == 0 or code == 3104:
+                pcd_path = f"{self._map_dir}/{map_name}.pcd"
+                self._node.clear_map_buffer()
+                self._node.set_map_status("mapping")
+                self._node.set_active_map(map_name)
+                self._db.add_map(map_name, pcd_path)
+                return {"status": "mapping", "map_name": map_name}
+            return {"error": f"StartMapping failed, code={code}", "response": resp}
+
+        elif action == "stop_mapping":
+            active_map = self._node._active_map
+            if not active_map:
+                return {"error": "No active map"}
+            pcd_path = f"{self._map_dir}/{active_map}.pcd"
+            # Save current buffer to PCD before stopping
+            self._node._maybe_save_pcd()
+            code, resp = self._client.StopMapping(pcd_path)
+            self._node.set_map_status("idle")
+            if code == 0:
+                return {"status": "stopped", "map_name": active_map, "pcd_path": pcd_path}
+            return {"error": f"StopMapping failed, code={code}", "response": resp}
+
+        elif action == "tag_place":
             name = args.get("name", "")
             if not name:
                 return {"error": "name is required"}
