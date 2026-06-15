@@ -52,13 +52,13 @@ class SpeedZone(enum.Enum):
 @dataclass
 class SpeedLimits:
     vx_normal: float = 1.0
-    vx_max: float = 1.2
+    vx_max: float = 5.0
     vx_decel: float = 0.5
     vy_normal: float = 0.2
-    vy_max: float = 0.4
+    vy_max: float = 5.0
     vy_decel: float = 0.1
     vyaw_normal: float = 0.4
-    vyaw_max: float = 1.5
+    vyaw_max: float = 5.0
     vyaw_decel: float = 0.2
 
 
