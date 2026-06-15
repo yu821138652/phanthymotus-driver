@@ -41,6 +41,10 @@ class StopReason(enum.Enum):
     OBSTACLE = "obstacle"
     DURATION_EXPIRED = "duration_expired"
     NAV_COMPLETE = "nav_complete"
+    TILT = "tilt"
+    FOOT_AIRBORNE = "foot_airborne"
+    COMM_TIMEOUT = "comm_timeout"
+    JOINT_OVERHEAT = "joint_overheat"
 
 
 class SpeedZone(enum.Enum):
@@ -342,6 +346,123 @@ def _run_smart_motion_process(namespace: str, config: dict, network_iface: str,
     except Exception as e:
         print(f"[SmartMotion:pid={os.getpid()}] WARNING: LiDAR subscribe failed: {e}")
 
+    # ── Safety monitors config ──
+    tilt_threshold = math.radians(config.get("tilt_threshold_deg", 35))
+    foot_force_min = config.get("foot_force_min", 10)
+    foot_airborne_timeout = config.get("foot_airborne_timeout", 0.2)
+    comm_timeout = config.get("comm_timeout", 0.5)
+    motor_temp_decel = config.get("motor_temp_decel", 75)
+    motor_temp_stop = config.get("motor_temp_stop", 85)
+
+    # Safety state
+    safety_lock = threading.Lock()
+    last_lowstate_time = time.monotonic()
+    tilt_triggered = False
+    foot_airborne_start = 0.0
+    max_motor_temp = 0.0
+    last_temp_check = 0.0
+
+    def emergency_stop(reason_str, extra=None):
+        """Emergency stop with optional damp mode for tilt."""
+        nonlocal state, current_cmd, speed_zone, move_timer
+        if move_timer:
+            move_timer.cancel()
+            move_timer = None
+        loco_client.StopMove()
+        if reason_str == "tilt":
+            try:
+                loco_client.SetFsmId(1)  # damp mode
+            except Exception:
+                pass
+        was_active = state in (MotionState.MOVING, MotionState.NAVIGATING, MotionState.NAV_PAUSED)
+        if state in (MotionState.NAVIGATING, MotionState.NAV_PAUSED):
+            try:
+                slam_client.PauseNav()
+            except Exception:
+                pass
+        state = MotionState.IDLE
+        current_cmd = None
+        speed_zone = SpeedZone.NORMAL
+        if was_active:
+            event_data = {"reason": reason_str}
+            if extra:
+                event_data.update(extra)
+            publish_event("safety_stop", event_data)
+
+    # ── LowState DDS Subscription (IMU tilt + joint temp) ──
+    def on_lowstate(msg):
+        nonlocal last_lowstate_time, tilt_triggered, max_motor_temp, last_temp_check
+
+        now = time.monotonic()
+        with safety_lock:
+            last_lowstate_time = now
+
+        # Tilt detection (20Hz, every callback)
+        imu = msg.imu_state
+        roll = abs(float(imu.rpy[0]))
+        pitch = abs(float(imu.rpy[1]))
+
+        if (roll > tilt_threshold or pitch > tilt_threshold):
+            if not tilt_triggered and state in (MotionState.MOVING, MotionState.NAVIGATING, MotionState.NAV_PAUSED):
+                tilt_triggered = True
+                emergency_stop("tilt", {
+                    "roll_deg": round(math.degrees(roll), 1),
+                    "pitch_deg": round(math.degrees(pitch), 1),
+                })
+        else:
+            tilt_triggered = False
+
+        # Joint temperature (1Hz check)
+        if now - last_temp_check >= 1.0:
+            last_temp_check = now
+            temp_max = 0.0
+            for m in msg.motor_state:
+                for t in m.temperature:
+                    if float(t) > temp_max:
+                        temp_max = float(t)
+            with safety_lock:
+                max_motor_temp = temp_max
+
+    try:
+        from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowState_
+        lowstate_sub = ChannelSubscriber("rt/lowstate", LowState_)
+        lowstate_sub.Init(on_lowstate, 10)
+        print(f"[SmartMotion:pid={os.getpid()}] LowState subscribed (tilt + temp)")
+    except Exception as e:
+        print(f"[SmartMotion:pid={os.getpid()}] WARNING: LowState subscribe failed: {e}")
+
+    # ── OdomState DDS Subscription (foot force) ──
+    def on_odom(msg):
+        nonlocal foot_airborne_start
+
+        if state != MotionState.MOVING:
+            foot_airborne_start = 0.0
+            return
+
+        forces = list(msg.foot_force)
+        all_airborne = all(f < foot_force_min for f in forces[:4]) if len(forces) >= 4 else False
+
+        if all_airborne:
+            now = time.monotonic()
+            if foot_airborne_start == 0.0:
+                foot_airborne_start = now
+            elif now - foot_airborne_start > foot_airborne_timeout:
+                foot_airborne_start = 0.0
+                emergency_stop("foot_airborne", {
+                    "foot_forces": [round(f, 1) for f in forces[:4]],
+                    "airborne_duration_ms": round((now - foot_airborne_start) * 1000),
+                })
+        else:
+            foot_airborne_start = 0.0
+
+    try:
+        from unitree_sdk2py.idl.unitree_go.msg.dds_ import SportModeState_
+        odom_sub = ChannelSubscriber("rt/odommodestate", SportModeState_)
+        odom_sub.Init(on_odom, 10)
+        print(f"[SmartMotion:pid={os.getpid()}] OdomState subscribed (foot force)")
+    except Exception as e:
+        print(f"[SmartMotion:pid={os.getpid()}] WARNING: OdomState subscribe failed: {e}")
+
     # ── Command handlers ──
     def handle_move(vx, vy, vyaw, duration):
         nonlocal state, current_cmd, speed_zone, move_timer
@@ -442,10 +563,38 @@ def _run_smart_motion_process(namespace: str, config: dict, network_iface: str,
             result["lateral_obstacle"] = lateral_obstacle
         return result
 
-    # ── Obstacle processing (inline in main loop) ──
-    def process_obstacles():
+    # ── Safety checks (inline in main loop) ──
+    def process_safety_checks():
         nonlocal state, speed_zone
 
+        # 1. Communication timeout
+        with safety_lock:
+            lowstate_age = time.monotonic() - last_lowstate_time
+            temp = max_motor_temp
+
+        if lowstate_age > comm_timeout and state in (MotionState.MOVING, MotionState.NAVIGATING, MotionState.NAV_PAUSED):
+            emergency_stop("comm_timeout", {"last_msg_age_ms": round(lowstate_age * 1000)})
+            return
+
+        # 2. Joint overheat
+        if state == MotionState.MOVING:
+            if temp > motor_temp_stop:
+                emergency_stop("joint_overheat", {"max_temp": round(temp, 1)})
+                return
+            elif temp > motor_temp_decel:
+                if speed_zone != SpeedZone.DECELERATED:
+                    speed_zone = SpeedZone.DECELERATED
+                    if current_cmd:
+                        dvx, dvy, dvyaw = clamp(current_cmd["vx"], current_cmd["vy"], current_cmd["vyaw"], SpeedZone.DECELERATED)
+                        loco_client.Move(dvx, dvy, dvyaw, True)
+                        publish_event("joint_overheat", {
+                            "max_temp": round(temp, 1),
+                            "action": "decelerate",
+                            "new_speed": {"vx": dvx, "vy": dvy, "vyaw": dvyaw},
+                        })
+                    return
+
+        # 3. Obstacle detection (original logic)
         with obstacle_lock:
             dist = obstacle_dist
             lateral = lateral_obstacle
@@ -458,7 +607,6 @@ def _run_smart_motion_process(namespace: str, config: dict, network_iface: str,
             elif dist <= decel_threshold or lateral:
                 if speed_zone != SpeedZone.DECELERATED:
                     speed_zone = SpeedZone.DECELERATED
-                    # Re-issue move with decelerated speed
                     if current_cmd:
                         dvx, dvy, dvyaw = clamp(current_cmd["vx"], current_cmd["vy"], current_cmd["vyaw"], SpeedZone.DECELERATED)
                         loco_client.Move(dvx, dvy, dvyaw, True)
@@ -539,11 +687,11 @@ def _run_smart_motion_process(namespace: str, config: dict, network_iface: str,
         except queue.Empty:
             pass
 
-        # Obstacle check at 10Hz
+        # Safety checks at 10Hz
         now = time.monotonic()
         if now - last_obstacle_check >= 0.1:
             last_obstacle_check = now
-            process_obstacles()
+            process_safety_checks()
 
         # Spin ROS2 (non-blocking)
         executor.spin_once(timeout_sec=0)
