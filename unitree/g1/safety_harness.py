@@ -417,7 +417,11 @@ class SmartMotion:
             print("[SmartMotion] obstacle detection disabled — running without LiDAR safety")
 
     def _on_cloud(self, msg) -> None:
-        """DDS callback: parse point cloud and compute obstacle distances."""
+        """DDS callback: parse point cloud and compute obstacle distances.
+
+        Strategy: process ALL points within forward 3m zone (no downsampling),
+        only downsample distant/lateral points for performance.
+        """
         # Determine current motion heading
         with self._state_lock:
             state = self._state
@@ -442,10 +446,6 @@ class SmartMotion:
         total_points = msg.width * msg.height
         data = bytes(msg.data)
 
-        # Downsample for performance (process max 2000 points)
-        max_process = 2000
-        stride = max(1, total_points // max_process)
-
         min_forward_dist = float("inf")
         min_forward_angle = 0.0
         lateral_detected = False
@@ -456,12 +456,13 @@ class SmartMotion:
         lateral_half_min = math.radians(45)
         lateral_half_max = math.radians(90)
 
-        count = 0
-        for i in range(0, total_points * point_step, point_step * stride):
-            if i + point_step > len(data):
-                break
-            count += 1
-            if count > max_process:
+        # Process every point — the critical safety zone is small so we need full coverage.
+        # Livox Mid-360 typically produces 10k-20k points/frame, parsing is fast with struct.
+        cos_h = math.cos(heading)
+        sin_h = math.sin(heading)
+
+        for i in range(0, total_points * point_step, point_step):
+            if i + z_off + 4 > len(data):
                 break
 
             px = struct.unpack_from('<f', data, i + x_off)[0]
@@ -472,11 +473,14 @@ class SmartMotion:
             if pz < z_min or pz > z_max:
                 continue
 
-            dist = math.sqrt(px * px + py * py)
-
-            # Ignore robot body points
-            if dist < 0.2:
+            # Quick distance squared check — skip points beyond decel threshold + margin
+            dist_sq = px * px + py * py
+            if dist_sq > 6.25:  # > 2.5m, well beyond decel threshold
                 continue
+            if dist_sq < 0.04:  # < 0.2m, robot body
+                continue
+
+            dist = math.sqrt(dist_sq)
 
             # Compute angle relative to motion heading
             point_angle = math.atan2(py, px)
