@@ -151,6 +151,7 @@ class SmartMotion:
 
         # Obstacle detection results
         self._min_obstacle_dist: float = float("inf")
+        self._min_obstacle_angle: float = 0.0
         self._lateral_obstacle: bool = False
         self._obstacle_lock = threading.Lock()
 
@@ -379,6 +380,7 @@ class SmartMotion:
             if reason == StopReason.OBSTACLE:
                 with self._obstacle_lock:
                     event_data["obstacle_distance"] = round(self._min_obstacle_dist, 2)
+                    event_data["obstacle_angle_deg"] = round(math.degrees(self._min_obstacle_angle), 1)
             self._publish_event("motion_stop", event_data)
 
         return {"ret": 0, "state": "idle", "reason": reason.value}
@@ -445,6 +447,7 @@ class SmartMotion:
         stride = max(1, total_points // max_process)
 
         min_forward_dist = float("inf")
+        min_forward_angle = 0.0
         lateral_detected = False
         z_min = self._z_min
         z_max = self._z_max
@@ -483,6 +486,7 @@ class SmartMotion:
             if angle_diff <= cone_half:
                 if dist < min_forward_dist:
                     min_forward_dist = dist
+                    min_forward_angle = point_angle
 
             # Lateral cross-traffic check (side sectors, close range)
             if lateral_half_min <= angle_diff <= lateral_half_max:
@@ -491,6 +495,7 @@ class SmartMotion:
 
         with self._obstacle_lock:
             self._min_obstacle_dist = min_forward_dist
+            self._min_obstacle_angle = min_forward_angle
             self._lateral_obstacle = lateral_detected
 
     # ── Internal: Obstacle Processing Loop ───────────────────────────────
@@ -568,9 +573,11 @@ class SmartMotion:
 
         with self._obstacle_lock:
             obs_dist = self._min_obstacle_dist
+            obs_angle = self._min_obstacle_angle
 
         self._publish_event("motion_decelerate", {
             "obstacle_distance": round(obs_dist, 2),
+            "obstacle_angle_deg": round(math.degrees(obs_angle), 1),
             "original_speed": {"vx": cmd.vx, "vy": cmd.vy, "vyaw": cmd.vyaw},
             "new_speed": {"vx": decel_vx, "vy": decel_vy, "vyaw": decel_vyaw},
         })
