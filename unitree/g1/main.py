@@ -21,7 +21,7 @@ import signal
 import socket
 import sys
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import yaml
@@ -349,7 +349,7 @@ def main():
 
     _start_registration(mcp_port, cfg.get("name", "Unitree G1"), "driver")
 
-    server = HTTPServer(("", mcp_port), make_handler())
+    server = ThreadingHTTPServer(("", mcp_port), make_handler())
     print(f"[bundle] MCP server → http://localhost:{mcp_port}")
 
     def _shutdown(signum, frame):
