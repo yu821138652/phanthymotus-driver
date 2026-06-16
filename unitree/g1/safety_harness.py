@@ -193,7 +193,7 @@ def _run_smart_motion_process(namespace: str, config: dict, network_iface: str,
     stop_threshold = config.get("stop_threshold", 0.8)
     cone_half_angle = math.radians(config.get("cone_half_angle", 30))
     z_min = config.get("z_min", -1.0)
-    z_max = config.get("z_max", 0.5)
+    z_max = config.get("z_max", 0.3)
     limits = SpeedLimits()
 
     # ── State ──
