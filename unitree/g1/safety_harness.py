@@ -329,6 +329,18 @@ def _run_smart_motion_process(namespace: str, config: dict, network_iface: str,
             min_fwd_dist = float(fwd_dists[idx])
             min_fwd_angle = float(point_angles[forward_mask][idx])
 
+            # Log obstacle point details when within decel threshold
+            if min_fwd_dist <= decel_threshold and state == MotionState.MOVING:
+                # Find the actual xyz of closest point
+                fwd_x = vx_pts[forward_mask][idx]
+                fwd_y = vy_pts[forward_mask][idx]
+                fwd_z = pz[valid][forward_mask][idx]
+                print(f"[SmartMotion:lidar] closest_fwd: dist={min_fwd_dist:.2f}m "
+                      f"xyz=({fwd_x:.2f},{fwd_y:.2f},{fwd_z:.2f}) "
+                      f"angle={math.degrees(min_fwd_angle):.1f}° "
+                      f"total_fwd_pts={int(forward_mask.sum())} "
+                      f"heading={math.degrees(heading):.1f}°", flush=True)
+
         # Lateral (45°-90°, within stop_threshold)
         lat_mask = (angle_diffs >= math.radians(45)) & \
                    (angle_diffs <= math.radians(90)) & \
@@ -620,10 +632,12 @@ def _run_smart_motion_process(namespace: str, config: dict, network_iface: str,
             if dist <= stop_threshold:
                 if speed_zone != SpeedZone.STOPPED:
                     speed_zone = SpeedZone.STOPPED
+                    print(f"[SmartMotion:obstacle] STOP — dist={dist:.2f}m angle={math.degrees(obstacle_angle):.1f}° lateral={lateral}", flush=True)
                     do_stop("obstacle")
             elif dist <= decel_threshold or lateral:
                 if speed_zone != SpeedZone.DECELERATED:
                     speed_zone = SpeedZone.DECELERATED
+                    print(f"[SmartMotion:obstacle] DECEL — dist={dist:.2f}m angle={math.degrees(obstacle_angle):.1f}° lateral={lateral}", flush=True)
                     if cmd:
                         dvx, dvy, dvyaw = clamp(cmd["vx"], cmd["vy"], cmd["vyaw"], SpeedZone.DECELERATED)
                         loco_client.Move(dvx, dvy, dvyaw, True)
