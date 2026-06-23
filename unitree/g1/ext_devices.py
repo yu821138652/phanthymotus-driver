@@ -368,13 +368,14 @@ class ExtMicPlugin:
         if action == "info":
             if instance_id and instance_id in self._nodes:
                 return self._nodes[instance_id]._status_dict()
-            # Return available devices list
+            # Infer topic from namespace + instance_id even before start
+            inferred_topic = f"/{self._namespace}/ext_mic/{instance_id}/audio" if instance_id else ""
             return {
                 "state": "idle",
                 "available_devices": self._available_devices,
                 "active_instances": list(self._nodes.keys()),
                 "topic_in": [],
-                "topic_out": [{"topic": "", "format": "audio/pcm-16k", "desc": ""}],
+                "topic_out": [{"topic": inferred_topic, "format": "audio/pcm-16k", "desc": "external mic audio"}],
             }
 
         elif action == "start":
@@ -465,12 +466,14 @@ class ExtCameraPlugin:
         if action == "info":
             if instance_id and instance_id in self._nodes:
                 return self._nodes[instance_id]._status_dict()
+            # Infer topic from namespace + instance_id even before start
+            inferred_topic = f"/{self._namespace}/ext_camera/{instance_id}/rgb" if instance_id else ""
             return {
                 "state": "idle",
                 "available_devices": self._available_devices,
                 "active_instances": list(self._nodes.keys()),
                 "topic_in": [],
-                "topic_out": [{"topic": "", "format": "image/jpeg", "desc": ""}],
+                "topic_out": [{"topic": inferred_topic, "format": "image/jpeg", "desc": "external camera JPEG"}],
             }
 
         elif action == "start":
