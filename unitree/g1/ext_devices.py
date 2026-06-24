@@ -9,6 +9,7 @@ tool instance on the canvas.
 
 import glob
 import logging
+import re
 import subprocess
 import threading
 import time
@@ -34,6 +35,9 @@ _LOW_LAT_QOS = QoSProfile(
 )
 
 JPEG_QUALITY = 80
+
+# Preferred pixel format order when auto-selecting
+_FOURCC_PRIORITY = ['MJPG', 'H264', 'YUYV']
 
 
 # ── Device Enumeration ────────────────────────────────────────────────────────
@@ -124,7 +128,18 @@ def _enumerate_ext_cameras() -> list[dict]:
                 name = line.split(':', 1)[-1].strip()
                 break
 
-        devices.append({"path": path, "name": name})
+        # Probe supported pixel formats via v4l2-ctl --list-formats-ext
+        formats: list[str] = []
+        try:
+            fmt_out = subprocess.check_output(
+                ['v4l2-ctl', '-d', path, '--list-formats-ext'],
+                text=True, timeout=2, stderr=subprocess.DEVNULL
+            )
+            formats = re.findall(r"'\s*([A-Z0-9]{4})\s*'", fmt_out)
+        except Exception:
+            pass
+
+        devices.append({"path": path, "name": name, "formats": formats})
     return devices
 
 
@@ -189,7 +204,8 @@ class _ExtCameraNode(Node):
     """Captures video from a V4L2 device and publishes JPEG CompressedImage."""
 
     def __init__(self, device_path: str, device_name: str, namespace: str, instance_id: str,
-                 fps: int = 15, width: int = 1920, height: int = 1080):
+                 fps: int = 15, width: int = 1920, height: int = 1080,
+                 pixel_format: str = "auto", available_formats: Optional[list] = None):
         node_name = f"ext_camera_{instance_id.replace('-', '_')}"
         super().__init__(node_name)
         self._device_path = device_path
@@ -200,10 +216,23 @@ class _ExtCameraNode(Node):
         self._fps = fps
         self._width = width
         self._height = height
+        self._pixel_format = pixel_format
+        self._available_formats: list = available_formats or []
         self._cap: Optional[cv2.VideoCapture] = None
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self.state = "idle"
+
+    def _resolve_fourcc(self) -> Optional[int]:
+        if self._pixel_format == "auto":
+            for f in _FOURCC_PRIORITY:
+                if f in self._available_formats:
+                    return cv2.VideoWriter_fourcc(*f)
+            return None  # let OpenCV negotiate
+        try:
+            return cv2.VideoWriter_fourcc(*self._pixel_format)
+        except Exception:
+            return None
 
     def start(self) -> dict:
         if self.state == "running":
@@ -211,6 +240,9 @@ class _ExtCameraNode(Node):
         self._cap = cv2.VideoCapture(self._device_path)
         if not self._cap.isOpened():
             raise RuntimeError(f"Cannot open camera: {self._device_path}")
+        fourcc = self._resolve_fourcc()
+        if fourcc is not None:
+            self._cap.set(cv2.CAP_PROP_FOURCC, fourcc)
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
         self._cap.set(cv2.CAP_PROP_FPS, self._fps)
@@ -434,6 +466,13 @@ class ExtCameraPlugin:
     def get_tools(self) -> list:
         # Build dynamic configSchema with enumerated devices
         device_options = [{"const": d["path"], "title": f"{d['name']} ({d['path']})"} for d in self._available_devices]
+        # Collect all unique formats across devices for pixel_format selector
+        all_formats: list[str] = []
+        for d in self._available_devices:
+            for f in d.get("formats", []):
+                if f not in all_formats:
+                    all_formats.append(f)
+        format_options = [{"const": "auto", "title": "自动"}] + [{"const": f, "title": f} for f in all_formats]
         tool = dict(TOOLS_EXT_CAMERA[0])
         tool["configSchema"] = {
             "type": "object",
@@ -447,6 +486,13 @@ class ExtCameraPlugin:
                 "device_name": {"type": "string", "description": "设备名称", "scope": "instance"},
                 "fps": {"type": "integer", "description": "帧率", "default": 15, "scope": "instance"},
                 "resolution": {"type": "string", "description": "分辨率 (如 1920x1080)", "default": "1920x1080", "scope": "instance"},
+                "pixel_format": {
+                    "type": "string",
+                    "description": "像素格式",
+                    "default": "auto",
+                    "scope": "instance",
+                    "oneOf": format_options,
+                },
             },
         }
         return [tool]
@@ -487,6 +533,12 @@ class ExtCameraPlugin:
                     device_name = self._available_devices[0]["name"]
                 else:
                     raise ValueError("No external camera device available")
+            # Resolve available formats for the selected device
+            available_formats: list[str] = []
+            for d in self._available_devices:
+                if d["path"] == device_path:
+                    available_formats = d.get("formats", [])
+                    break
             # Parse resolution
             resolution = args.get("resolution", "1920x1080")
             try:
@@ -495,10 +547,12 @@ class ExtCameraPlugin:
             except Exception:
                 width, height = 1920, 1080
             fps = int(args.get("fps", 15))
+            pixel_format = args.get("pixel_format", "auto")
 
             if instance_id not in self._nodes:
                 node = _ExtCameraNode(device_path, device_name, self._namespace, instance_id,
-                                      fps=fps, width=width, height=height)
+                                      fps=fps, width=width, height=height,
+                                      pixel_format=pixel_format, available_formats=available_formats)
                 self._executor.add_node(node)
                 self._nodes[instance_id] = node
             return self._nodes[instance_id].start()
