@@ -139,7 +139,7 @@ class _ExtMicNode(Node):
         self._device_index = device_index
         self._device_name = device_name
         self._instance_id = instance_id
-        self._topic = f"/{namespace}/ext_mic/{instance_id}/audio"
+        self._topic = f"/{namespace}/ext_mic/{instance_id.replace('-', '_')}/audio"
         self._pub = self.create_publisher(AudioChunk, self._topic, _LOW_LAT_QOS)
         self._stream = None
         self.state = "idle"
@@ -195,7 +195,7 @@ class _ExtCameraNode(Node):
         self._device_path = device_path
         self._device_name = device_name
         self._instance_id = instance_id
-        self._topic = f"/{namespace}/ext_camera/{instance_id}/rgb"
+        self._topic = f"/{namespace}/ext_camera/{instance_id.replace('-', '_')}/rgb"
         self._pub = self.create_publisher(CompressedImage, self._topic, _LOW_LAT_QOS)
         self._fps = fps
         self._width = width
@@ -369,7 +369,7 @@ class ExtMicPlugin:
             if instance_id and instance_id in self._nodes:
                 return self._nodes[instance_id]._status_dict()
             # Infer topic from namespace + instance_id even before start
-            inferred_topic = f"/{self._namespace}/ext_mic/{instance_id}/audio" if instance_id else ""
+            inferred_topic = f"/{self._namespace}/ext_mic/{instance_id.replace('-', '_')}/audio" if instance_id else ""
             return {
                 "state": "idle",
                 "available_devices": self._available_devices,
@@ -467,7 +467,7 @@ class ExtCameraPlugin:
             if instance_id and instance_id in self._nodes:
                 return self._nodes[instance_id]._status_dict()
             # Infer topic from namespace + instance_id even before start
-            inferred_topic = f"/{self._namespace}/ext_camera/{instance_id}/rgb" if instance_id else ""
+            inferred_topic = f"/{self._namespace}/ext_camera/{instance_id.replace('-', '_')}/rgb" if instance_id else ""
             return {
                 "state": "idle",
                 "available_devices": self._available_devices,
