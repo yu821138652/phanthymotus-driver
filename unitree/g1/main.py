@@ -166,8 +166,6 @@ class G1DeviceBundle:
             plugin_tools = p.get_tools() if hasattr(p, 'get_tools') else [p.get_tool()]
             for tool_def in plugin_tools:
                 if tool_def["name"] == tool_name:
-                    if tool_def["type"] == "sensor":
-                        return {"info": "Sensor is active, data flows via ROS2 topic. No callable actions."}
                     if tool_def["type"] == "resource":
                         return p.dispatch(tool_name, args)
                     action = args.pop("action", tool_name)
