@@ -81,6 +81,29 @@ def _enumerate_ext_mics() -> list[dict]:
     if devices:
         return devices
 
+    # Second try: pyalsaaudio — works when PortAudio doesn't enumerate USB audio (e.g. Jetson)
+    try:
+        import alsaaudio
+        capture_pcms = set(alsaaudio.pcms(alsaaudio.PCM_CAPTURE))
+        for idx, card_name in enumerate(alsaaudio.cards()):
+            name_lower = card_name.lower()
+            if 'realsense' in name_lower or 'intel' in name_lower:
+                continue
+            if 'ape' in name_lower or 'tegra' in name_lower or 'hda' in name_lower:
+                continue
+            alsa_id = f"hw:CARD={card_name},DEV=0"
+            if alsa_id not in capture_pcms:
+                continue
+            devices.append({
+                "index": idx,
+                "alsa_id": alsa_id,
+                "name": card_name,
+            })
+        if devices:
+            return devices
+    except Exception as e:
+        log.debug(f"[ext_mic] pyalsaaudio enumeration failed: {e}")
+
     # Fallback: sounddevice
     try:
         import sounddevice as sd
@@ -154,20 +177,35 @@ def _enumerate_ext_cameras() -> list[dict]:
 class _ExtMicNode(Node):
     """Captures audio from a system input device and publishes AudioChunk."""
 
-    def __init__(self, device_index: int, device_name: str, namespace: str, instance_id: str):
+    def __init__(self, device_index, device_name: str, namespace: str, instance_id: str):
         node_name = f"ext_mic_{instance_id.replace('-', '_')}"
         super().__init__(node_name)
-        self._device_index = device_index
+        self._device_index = device_index  # alsa_id string (hw:CARD=...) or numeric index
         self._device_name = device_name
         self._instance_id = instance_id
         self._topic = f"/{namespace}/ext_mic/{instance_id.replace('-', '_')}/audio"
         self._pub = self.create_publisher(AudioChunk, self._topic, _LOW_LAT_QOS)
         self._stream = None
+        self._alsa_pcm = None   # used when device_index is an ALSA card name string
+        self._thread: Optional[threading.Thread] = None
+        self._running = False
         self.state = "idle"
+
+    def _is_alsa_id(self) -> bool:
+        return isinstance(self._device_index, str) and self._device_index.startswith("hw:CARD=")
 
     def start(self) -> dict:
         if self.state == "running":
             return self._status_dict()
+        if self._is_alsa_id():
+            self._start_alsaaudio()
+        else:
+            self._start_sounddevice()
+        self.state = "running"
+        log.info(f"[ext_mic] started device={self._device_name} ({self._device_index}) → {self._topic}")
+        return self._status_dict()
+
+    def _start_sounddevice(self):
         import sounddevice as sd
         self._stream = sd.InputStream(
             device=self._device_index,
@@ -175,11 +213,43 @@ class _ExtMicNode(Node):
             blocksize=512, callback=self._audio_cb,
         )
         self._stream.start()
-        self.state = "running"
-        log.info(f"[ext_mic] started device={self._device_name} → {self._topic}")
-        return self._status_dict()
+
+    def _start_alsaaudio(self):
+        import alsaaudio
+        # alsa_id format: "hw:CARD=Pro,DEV=0"
+        card_part = self._device_index.split("hw:CARD=", 1)[1].split(",DEV=")[0]
+        card_idx = alsaaudio.cards().index(card_part)
+        self._alsa_pcm = alsaaudio.PCM(
+            type=alsaaudio.PCM_CAPTURE,
+            mode=alsaaudio.PCM_NORMAL,
+            rate=16000, channels=1,
+            format=alsaaudio.PCM_FORMAT_S16_LE,
+            periodsize=512,
+            cardindex=card_idx,
+        )
+        self._running = True
+        self._thread = threading.Thread(target=self._alsa_capture_loop, daemon=True)
+        self._thread.start()
+
+    def _alsa_capture_loop(self):
+        while self._running:
+            length, data = self._alsa_pcm.read()
+            if length <= 0:
+                continue
+            msg = AudioChunk()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.format = "audio/pcm-16k"
+            msg.data = list(data)
+            self._pub.publish(msg)
 
     def stop(self) -> dict:
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=3)
+            self._thread = None
+        if self._alsa_pcm:
+            self._alsa_pcm.close()
+            self._alsa_pcm = None
         if self._stream:
             self._stream.stop()
             self._stream.close()
