@@ -1,0 +1,9 @@
+name: "RobotEra Q5 (Bundle)"
+mcp_port: 15793
+ros_namespace: ""
+
+plugins:
+  joint_state:
+    enabled: true
+  robot_ready:
+    enabled: true
