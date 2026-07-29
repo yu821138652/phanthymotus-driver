@@ -130,6 +130,11 @@ class G1DeviceBundle:
             self._plugins.append(ControlledSpatialPlugin(controlled_cfg, namespace, executor, slam_client, smart_motion=smart_motion))
             print("[bundle] ControlledSpatialPlugin loaded")
 
+        if plugins_cfg.get("exhibition_knowledge", {}).get("enabled", False):
+            from exhibition_knowledge import ExhibitionKnowledgePlugin
+            self._plugins.append(ExhibitionKnowledgePlugin(plugins_cfg["exhibition_knowledge"], namespace, executor))
+            print("[bundle] ExhibitionKnowledgePlugin loaded")
+
         if plugins_cfg.get("motion_switcher", {}).get("enabled", False):
             from device import MotionSwitcherPlugin
             self._plugins.append(MotionSwitcherPlugin(plugins_cfg["motion_switcher"], namespace, executor, msc_client))

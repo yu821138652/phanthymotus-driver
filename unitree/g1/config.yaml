@@ -28,6 +28,10 @@ plugins:
     enabled: true
     native_slam_pcd_dir: /home/unitree
     native_slam_db_path: /opt/phanthy-motus/data/controlled_spatial.db
+  exhibition_knowledge:
+    enabled: true
+    data_path: /opt/phanthy-motus/data/exhibition-knowledge/beijing-exhibition.json
+    seed_path: /work/resource/knowledge/beijing-exhibition.json
   motion_switcher:
     enabled: true
   ext_mic:

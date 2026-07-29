@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "catalogId": "beijing-exhibition",
+  "title": "范式北京展厅资料库",
+  "exhibits": {
+    "company": {"title": "公司介绍", "aliases": ["范式", "范式智能", "公司介绍", "Phancy"], "content": "范式智能（6682.HK）提供从异构算力纳管优化到智能体模型调用的全栈 AI 基础设施，产品包括 HAMi、信创模盒和先知 AIOS。公司以 AI for Everyone 为使命，强调在 AI 2.0 时代建设高效、规模化的 Token Factory。"},
+    "four-paradigms": {"title": "The Four Paradigms", "aliases": ["四个范式", "four paradigms", "P2"], "poseId": "P2", "order": 1, "content": "这一展项介绍实验科学、理论科学、计算科学和 AI for Science 四个范式。第四范式强调让机器从海量数据中发现规律，是大模型和 AI 科研的重要基础。范式据此推进 AI Agent 加 World Model 的技术策略，探索智能科学发现与产业应用。"},
+    "group-milestones": {"title": "Phancy Group Milestones", "aliases": ["发展历程", "里程碑", "milestones", "P3"], "poseId": "P3", "order": 2, "content": "范式集团成立于 2014 年 9 月，2018 年成为独角兽企业，2023 年以 6682.HK 在港交所上市。2024 年推出 Rise vGPU，2025 年发布 Phancy AI Glasses 和 ModelHub XC 并升级为 Phancy Group。到 2026 年上半年，业务覆盖 Phanthy Platform、Phanthy Cloud、PhanRouter、Phanthy Movie 和 Phanthy Motus。"},
+    "phanthy-motus-advantage": {"title": "PhanthyMotus Advantage", "aliases": ["具身智能", "PhanthyMotus 优势", "motus advantage", "P4"], "poseId": "P4", "order": 3, "content": "PhanthyMotus 是面向机器人的具身大脑：下层适配机器人和算力，中间以 MCP、DDS 和集群运营连接设备，上层由智能体编排可复用技能。它支持人形、四足、机械臂、灵巧手、无人机和水下机器人，目标是一次开发能力，再适配多种硬件。"},
+    "phanthy-motus-demo": {"title": "PhanthyMotus Demo", "aliases": ["PhanthyMotus 演示", "具身智能演示", "motus demo", "P5"], "poseId": "P5", "order": 4, "content": "PhanthyMotus 是基于 ROS2 的开源具身 AI Agent 框架和平台，连接多模态传感器、世界模型和机器人执行层。控制台可以实时查看音频波形、电量、三维骨架和点云，也可管理智能体身份、系统提示词、长期记忆及部署版本。这里展示的是机器人从感知、推理到执行的可观察工作流。"},
+    "token-factory": {"title": "Token Factory", "aliases": ["token 工厂", "Token Factory", "P6"], "poseId": "P6", "order": 5, "content": "Token Factory 将 GPU 算力转化为按需可用的 tokens，并通过算力、tokens、应用三层组织资源。它利用跨时区调度、错峰调度和成本优化，提高 GPU 利用率并降低单位推理成本。自有算力追求持续高利用率，第三方算力则提供弹性扩展和峰值补充。"},
+    "hami-vgpu": {"title": "HAMi vGPU", "aliases": ["HAMI", "虚拟 GPU", "vGPU", "P8"], "poseId": "P8", "order": 6, "content": "HAMi vGPU 是异构 AI 算力虚拟化平台，覆盖集群调度控制面到容器运行时驱动。它通过统一设备抽象、拓扑感知调度和 CUDA、NVML API 拦截，实现 GPU 显存和算力的隔离。展项展示一张卡服务多个任务，以及利用率从 25% 提升到 90% 的示例。"},
+    "modelhub": {"title": "ModelHub", "aliases": ["模型社区", "Model Hub", "ModelHub XC", "P10"], "poseId": "P10", "order": 7, "content": "ModelHub 是由 ModelHub XC 与 Phancy 共同呈现的模型生态社区，连接开发者、硬件厂商与企业客户。它聚焦国产算力平台和 AI 模型的适配、供给与协同，帮助降低模型迁移门槛和对 CUDA 生态的依赖。"},
+    "phanthy-movie": {"title": "PhanthyMovie", "aliases": ["Phanthy Movie", "短视频", "视频生成", "P11"], "poseId": "P11", "order": 8, "content": "PhanthyMovie 是面向内容创作者的 AI 短视频生成平台，可将创意、主题或内容需求转化为视频。现场以当前可用的体验链接和界面为准，引导访客按屏幕说明体验，不承诺未在现场提供的功能。"},
+    "frost-sullivan": {"title": "Frost & Sullivan", "aliases": ["弗若斯特沙利文", "Frost and Sullivan", "P12"], "poseId": "P12", "order": 9, "content": "Frost & Sullivan 的评估将 Rise vGPU 放在 Tier 1 领先平台区间，反映其资源控制覆盖度和生产编排能力。展项中 ModelHub 在五项评估中得分为 4.6、4.8、4.5、4.5、4.5，总分 4.58。"},
+    "idc": {"title": "IDC", "aliases": ["市场份额", "IDC 报告", "P13"], "poseId": "P13", "order": 10, "content": "根据展项提供的 IDC 市场评估，范式自 2018 年以来连续七年位居中国机器学习平台市场份额第一，最新展示数据为 34%。表述这些数字时，限定为本展项展示的 IDC 数据，不扩展为未经提供的最新市场结论。"},
+    "core-product-matrix": {"title": "Core Product Matrix", "aliases": ["产品矩阵", "核心产品矩阵", "P14"], "poseId": "P14", "order": 11, "content": "范式的企业级 AI 操作系统连接算力、数据、模型、智能体与云服务。HAMi RISE vGPU 负责 GPU 虚拟化、资源池化和优化，Ontology 作为共享数据层，ModelHub 提供模型适配与供给；Phanthy Enterprise、PhanClaw、PhanRouter、SageAIOS、SHIFT、HyperCircle 与 PhanthyCloud 共同构成产品矩阵。"},
+    "welcome": {"title": "欢迎点", "aliases": ["入口", "返回入口", "欢迎点", "P1"], "poseId": "P1", "order": 0, "content": "欢迎点位于展厅入口，用于迎宾、集合和返回入口，不包含独立展项讲解。"}
+  }
+}
