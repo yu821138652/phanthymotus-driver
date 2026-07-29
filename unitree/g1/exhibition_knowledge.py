@@ -138,6 +138,17 @@ class _KnowledgeStore:
             self._save_unlocked(catalog)
             return {"id": entry_id, **entry}
 
+    def delete(self, entry_id: str) -> dict[str, Any] | None:
+        if not isinstance(entry_id, str) or not _ENTRY_ID.fullmatch(entry_id):
+            raise ValueError("entry_id must contain only lowercase letters, digits, and hyphens")
+        with self._lock:
+            catalog = self._load_unlocked()
+            removed = catalog["exhibits"].pop(entry_id, None)
+            if removed is None:
+                return None
+            self._save_unlocked(catalog)
+            return {"id": entry_id, **removed}
+
     def validate(self) -> dict[str, Any]:
         with self._lock:
             catalog = self._load_unlocked()
@@ -171,11 +182,11 @@ class ExhibitionKnowledgePlugin:
             "name": self.PREFIX,
             "type": "actuator",
             "multiInstance": False,
-            "description": "Beijing exhibition knowledge base. Read, search, validate, and explicitly update exhibition narration and navigation metadata.",
+            "description": "Beijing exhibition knowledge base. Read, search, validate, explicitly update, and explicitly delete exhibition narration and navigation metadata.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["list", "get", "search", "upsert", "validate"]},
+                    "action": {"type": "string", "enum": ["list", "get", "search", "upsert", "delete", "validate"]},
                     "entry_id": {"type": "string", "description": "Knowledge entry ID, for example token-factory or company."},
                     "query": {"type": "string", "description": "Exhibition name, alias, pose ID, or keyword."},
                     "title": {"type": "string", "description": "Display title for an upsert."},
@@ -190,6 +201,7 @@ class ExhibitionKnowledgePlugin:
                     "get": {"params": ["entry_id"], "description": "Read one complete entry."},
                     "search": {"params": ["query"], "description": "Search by ID, title, alias, pose ID, or content keyword."},
                     "upsert": {"params": ["entry_id", "title", "content", "aliases_json", "pose_id", "order"], "description": "Create or fully replace one entry. Requires explicit user-approved content."},
+                    "delete": {"params": ["entry_id"], "description": "Delete one entry by ID. Requires an explicit user request and prior lookup confirmation."},
                     "validate": {"params": [], "description": "Validate the knowledge base and report duplicate pose IDs."},
                 },
             },
@@ -225,6 +237,15 @@ class ExhibitionKnowledgePlugin:
             except ValueError as exc:
                 return {"error": "validation_error", "message": str(exc)}
             return {"status": "updated", "entry": entry, "catalog": self._store.validate()}
+        if action == "delete":
+            entry_id = args.get("entry_id", "")
+            try:
+                entry = self._store.delete(entry_id)
+            except ValueError as exc:
+                return {"error": "validation_error", "message": str(exc)}
+            if entry is None:
+                return {"error": "entry_not_found", "entryId": entry_id}
+            return {"status": "deleted", "entry": entry, "catalog": self._store.validate()}
         if action == "validate":
             return self._store.validate()
         return None
