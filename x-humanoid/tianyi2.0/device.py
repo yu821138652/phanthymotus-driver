@@ -555,15 +555,8 @@ class StatePlugin:
             self._pub_estop = self._pub_node.create_publisher(String, self._topic_estop, _LOW_LAT_QOS)
             self._pub_force = self._pub_node.create_publisher(String, self._topic_force, _LOW_LAT_QOS)
 
-        # The RH56DFX trial is opt-in. Keep the calibrated Tianyi model as
-        # the production default so an experimental visualization cannot
-        # affect the live skeleton by accident.
-        resource_dir = Path(__file__).parent / "resource"
-        urdf_model = str(plugin_config.get("urdf_model", "tianyi2_model.urdf"))
-        self._urdf_path = resource_dir / Path(urdf_model).name
-        if not self._urdf_path.is_file():
-            raise FileNotFoundError(f"URDF model not found: {self._urdf_path}")
-        self._rh56dfx_trial = self._urdf_path.name == "tianyi2_model_rh56dfx_trial.urdf"
+        # URDF path
+        self._urdf_path = Path(__file__).parent / "resource" / "tianyi2_model.urdf"
 
     def get_tools(self) -> list:
         return [
@@ -817,24 +810,6 @@ class StatePlugin:
                         "q": -bend_q,
                         **shared,
                     })
-                elif finger == "thumb_bend" and self._rh56dfx_trial:
-                    # The public RH56DFX model uses a flexion joint followed
-                    # by two mechanically coupled joints. The renderer does
-                    # not implement URDF <mimic>, so publish them explicitly.
-                    joints.extend([
-                        {
-                            "idx": f"{side}_hand_thumb_middle",
-                            "name": f"{side}_hand_thumb_middle_joint",
-                            "q": bend_q * 1.1425,
-                            **shared,
-                        },
-                        {
-                            "idx": f"{side}_hand_thumb_distal",
-                            "name": f"{side}_hand_thumb_distal_joint",
-                            "q": bend_q * 1.1425 * 0.7508,
-                            **shared,
-                        },
-                    ])
 
         return {"joints": joints, "timestamp_ms": now_ms, "hands": hands}
 
