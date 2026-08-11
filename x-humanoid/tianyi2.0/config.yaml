@@ -13,6 +13,10 @@ slamtec:
 plugins:
   state:
     enabled: true
+    # The default is the hand model calibrated against the Tianyi hardware.
+    # To inspect the isolated RH56DFX-inspired stick model, change this to
+    # tianyi2_model_rh56dfx_trial.urdf and restart the container.
+    urdf_model: "tianyi2_model.urdf"
   camera:
     enabled: true
   imu:
