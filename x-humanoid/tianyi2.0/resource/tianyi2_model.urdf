@@ -266,7 +266,7 @@
   </joint>
   <link name="left_hand_little_tip_link"><inertial><mass value="0.01"/></inertial></link>
   <joint name="left_hand_little_tip" type="fixed">
-    <origin xyz="0 0 -0.060" rpy="0 0 0"/>
+    <origin xyz="0 0 -0.030" rpy="0 0 0"/>
     <parent link="left_hand_little_distal_link"/><child link="left_hand_little_tip_link"/>
   </joint>
 
@@ -286,7 +286,7 @@
   </joint>
   <link name="left_hand_ring_tip_link"><inertial><mass value="0.01"/></inertial></link>
   <joint name="left_hand_ring_tip" type="fixed">
-    <origin xyz="0 0 -0.070" rpy="0 0 0"/>
+    <origin xyz="0 0 -0.035" rpy="0 0 0"/>
     <parent link="left_hand_ring_distal_link"/><child link="left_hand_ring_tip_link"/>
   </joint>
 
@@ -306,7 +306,7 @@
   </joint>
   <link name="left_hand_middle_tip_link"><inertial><mass value="0.01"/></inertial></link>
   <joint name="left_hand_middle_tip" type="fixed">
-    <origin xyz="0 0 -0.075" rpy="0 0 0"/>
+    <origin xyz="0 0 -0.0375" rpy="0 0 0"/>
     <parent link="left_hand_middle_distal_link"/><child link="left_hand_middle_tip_link"/>
   </joint>
 
@@ -326,14 +326,14 @@
   </joint>
   <link name="left_hand_index_tip_link"><inertial><mass value="0.01"/></inertial></link>
   <joint name="left_hand_index_tip" type="fixed">
-    <origin xyz="0 0 -0.070" rpy="0 0 0"/>
+    <origin xyz="0 0 -0.035" rpy="0 0 0"/>
     <parent link="left_hand_index_distal_link"/><child link="left_hand_index_tip_link"/>
   </joint>
 
   <link name="left_hand_thumb_rotation_link"><inertial><mass value="0.02"/></inertial></link>
   <joint name="left_hand_thumb_rotation_joint" type="revolute">
     <!-- Thumb sits on the index-finger side of the left palm. -->
-    <origin xyz="0 0.035 -0.015" rpy="0 0 0"/>
+    <origin xyz="0 0.035 -0.015" rpy="0 0 -0.349066"/>
     <parent link="left_palm_link"/><child link="left_hand_thumb_rotation_link"/>
     <!-- Mirror the right thumb so positive rotation moves toward centre. -->
     <axis xyz="0 0 -1"/>
@@ -378,7 +378,7 @@
   </joint>
   <link name="right_hand_little_tip_link"><inertial><mass value="0.01"/></inertial></link>
   <joint name="right_hand_little_tip" type="fixed">
-    <origin xyz="0 0 -0.060" rpy="0 0 0"/>
+    <origin xyz="0 0 -0.030" rpy="0 0 0"/>
     <parent link="right_hand_little_distal_link"/><child link="right_hand_little_tip_link"/>
   </joint>
 
@@ -398,7 +398,7 @@
   </joint>
   <link name="right_hand_ring_tip_link"><inertial><mass value="0.01"/></inertial></link>
   <joint name="right_hand_ring_tip" type="fixed">
-    <origin xyz="0 0 -0.070" rpy="0 0 0"/>
+    <origin xyz="0 0 -0.035" rpy="0 0 0"/>
     <parent link="right_hand_ring_distal_link"/><child link="right_hand_ring_tip_link"/>
   </joint>
 
@@ -418,7 +418,7 @@
   </joint>
   <link name="right_hand_middle_tip_link"><inertial><mass value="0.01"/></inertial></link>
   <joint name="right_hand_middle_tip" type="fixed">
-    <origin xyz="0 0 -0.075" rpy="0 0 0"/>
+    <origin xyz="0 0 -0.0375" rpy="0 0 0"/>
     <parent link="right_hand_middle_distal_link"/><child link="right_hand_middle_tip_link"/>
   </joint>
 
@@ -438,13 +438,13 @@
   </joint>
   <link name="right_hand_index_tip_link"><inertial><mass value="0.01"/></inertial></link>
   <joint name="right_hand_index_tip" type="fixed">
-    <origin xyz="0 0 -0.070" rpy="0 0 0"/>
+    <origin xyz="0 0 -0.035" rpy="0 0 0"/>
     <parent link="right_hand_index_distal_link"/><child link="right_hand_index_tip_link"/>
   </joint>
 
   <link name="right_hand_thumb_rotation_link"><inertial><mass value="0.02"/></inertial></link>
   <joint name="right_hand_thumb_rotation_joint" type="revolute">
-    <origin xyz="0 -0.035 -0.015" rpy="0 0 0"/>
+    <origin xyz="0 -0.035 -0.015" rpy="0 0 0.349066"/>
     <parent link="right_palm_link"/><child link="right_hand_thumb_rotation_link"/>
     <axis xyz="0 0 1"/>
     <limit lower="0" upper="1.571" effort="2" velocity="4"/>
