@@ -1254,10 +1254,13 @@ class S10NavigationPlugin:
                                                          "command_response": response, **detail})
                     return
                 time.sleep(0.2)
+            cancel_result = self._request_cancel()
             self._finish_goal(action_id, "error", {"state": "error", "message": "navigation status timed out",
-                                                    "command_response": response})
+                                                    "command_response": response, "cancel_result": cancel_result})
         except Exception as exc:
-            self._finish_goal(action_id, "error", {"state": "error", "message": str(exc)})
+            cancel_result = self._request_cancel()
+            self._finish_goal(action_id, "error", {"state": "error", "message": str(exc),
+                                                    "cancel_result": cancel_result})
 
     @staticmethod
     def _navigation_terminal(response):
@@ -1296,19 +1299,37 @@ class S10NavigationPlugin:
             return "error", {"message": "navigation task failed", "status": raw}
         return None
 
+    def _request_cancel(self):
+        try:
+            response = self.native.request(0x00100003, 0x00100004)
+            body = response.get("PatrolDevice", response) if isinstance(response, dict) else {}
+            items = body.get("Items", body) if isinstance(body, dict) else {}
+            if not isinstance(items, dict) or items.get("ErrorCode") is None:
+                return {"state": "error", "reason": "navigation_cancel_failed",
+                        "message": "cancel response missing Items.ErrorCode", "response": response}
+            raw_code = str(items["ErrorCode"]).strip().lower()
+            try:
+                code = int(raw_code, 16 if raw_code.startswith("0x") else 10)
+            except ValueError:
+                code = raw_code
+            if code != 0:
+                return {"state": "error", "reason": "navigation_cancel_failed",
+                        "error_code": code, "response": response}
+            return {"state": "sent", "response": response}
+        except Exception as exc:
+            return {"state": "error", "reason": "navigation_cancel_failed", "message": str(exc)}
+
     def _cancel_goal(self):
         with self._goal_lock:
             action_id = self._active_goal
         if action_id is None:
             return None
-        try:
-            response = self.native.request(0x00100003, 0x00100004)
-        except Exception as exc:
-            result = {"state": "error", "reason": "navigation_cancel_failed", "message": str(exc)}
+        result = self._request_cancel()
+        if result["state"] == "error":
             self._finish_goal(action_id, "error", result)
             return result
         self._finish_goal(action_id, "cancelled", {"state": "cancelled", "reason": "navigation_cancelled"})
-        return response
+        return result["response"]
 
     def start(self): pass
     def stop(self):
